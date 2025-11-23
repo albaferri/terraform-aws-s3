@@ -1,0 +1,59 @@
+name: 'Terraform S3 Deployment with Wiz Scan'
+
+on:
+  push:
+    branches:
+      - main # Trigger on push to the main branch
+
+jobs:
+  iac-pipeline:
+    runs-on: ubuntu-latest
+
+    # This is where you configure the environment variables for AWS
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: 'us-east-1' # <-- Change to your desired AWS region
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.x # Use a specific version if required
+
+      # --- SECURITY SCAN STEP: WIZCLI ---
+      - name: Install Wiz CLI
+        run: |
+          wget -q -O wizcli https://downloads.wiz.io/wizcli/latest/wizcli-linux-amd64 
+          chmod +x wizcli
+          
+      - name: Configure Wiz Credentials
+        run: |
+          ./wizcli auth jwt-token --client-id "${{ secrets.WIZ_CLIENT_ID }}" --client-secret "${{ secrets.WIZ_CLIENT_SECRET }}"
+        env:
+          WIZ_CLIENT_ID: ${{ secrets.WIZ_CLIENT_ID }} 
+          WIZ_CLIENT_SECRET: ${{ secrets.WIZ_CLIENT_SECRET }} 
+
+      - name: Scan IaC with Wiz CLI
+        # This command runs the scan on your current directory (which contains your .tf files)
+        # and will fail the job if a high-severity issue is found (based on your Wiz policy).
+        run: |
+          ./wizcli dir scan --path .
+        # The workflow will stop here if the scan fails, preventing deployment!
+
+      # --- TERRAFORM DEPLOYMENT STEPS ---
+      - name: Terraform Init
+        id: init
+        run: terraform init
+
+      - name: Terraform Plan
+        id: plan
+        run: terraform plan -no-color
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve
+        # **NOTE:** For production environments, you should remove -auto-approve 
+        # and use a separate environment with manual approval steps.
